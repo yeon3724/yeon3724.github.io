@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Validate portfolio
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check page structure and navigation
+        run: |
+          python3 - <<'PY'
+          from html.parser import HTMLParser
+          from pathlib import Path
+
+          class Portfolio(HTMLParser):
+              def __init__(self):
+                  super().__init__()
+                  self.ids = set()
+                  self.anchors = set()
+                  self.headings = 0
+                  self.lang = None
+
+              def handle_starttag(self, tag, attributes):
+                  attrs = dict(attributes)
+                  if tag == "html":
+                      self.lang = attrs.get("lang")
+                  if tag == "h1":
+                      self.headings += 1
+                  if element_id := attrs.get("id"):
+                      assert element_id not in self.ids, f"Duplicate ID: {element_id}"
+                      self.ids.add(element_id)
+                  if tag == "a" and (href := attrs.get("href", "")).startswith("#"):
+                      self.anchors.add(href[1:])
+
+          html = Path("index.html").read_text(encoding="utf-8")
+          assert html.lower().startswith("<!doctype html>"), "Missing HTML doctype"
+          page = Portfolio()
+          page.feed(html)
+          page.close()
+          assert page.lang == "ko" and page.headings == 1, "Expected a Korean page with one h1"
+          assert {"main", "work"} <= page.ids, "Missing page or work section"
+          assert not (page.anchors - page.ids), f"Broken anchors: {page.anchors - page.ids}"
+          PY
