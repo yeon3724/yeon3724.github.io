@@ -23,17 +23,33 @@ def check_page(browser, url):
             assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
         assert page.locator(".hero-photo img").evaluate("(image) => image.complete && image.naturalWidth > 0")
         assert all(urlsplit(request).netloc == urlsplit(url).netloc for request in requests)
-        for anchor in ("devflow", "auth-infra-portal", "sentinel"):
+        for anchor in ("devflow", "auth-infra-portal", "sentinel", "qc-studio", "atlas", "as-field"):
             page.goto("about:blank")
             page.goto(url + "#" + anchor)
             page.locator("#" + anchor).wait_for(state="visible")
             assert page.locator("#" + anchor).evaluate("(node) => node.getBoundingClientRect().top < innerHeight")
         page.goto(url)
-        for opened in (False, True):
-            page.locator("details").evaluate("(element, open) => { element.open = open }", opened)
-            pdf = PdfReader(BytesIO(page.pdf()))
-            text = "".join(sheet.extract_text() or "" for sheet in pdf.pages)
-            assert "MCP" in text, "Printed Sentinel story missing"
+        assert not any(request.endswith(".mp4") for request in requests)
+        assert page.locator("video").count() == 0
+        devtools.send("Page.setFontSizes", {"fontSizes": {"minimumFontSize": 0}})
+        for preview in page.locator(".project-preview").all():
+            preview.scroll_into_view_if_needed()
+            image = preview.locator("img").element_handle()
+            page.wait_for_function("(image) => image.complete && image.naturalWidth > 0", arg=image)
+            preview.focus()
+            preview.press("Enter")
+            video = preview.locator("..").locator("video")
+            player = video.element_handle()
+            page.wait_for_function("(video) => video.currentTime > 0 && !video.paused", arg=player)
+            assert video.evaluate("(video) => video.controls && video.playsInline && video.duration > 16")
+            assert page.locator("video").evaluate_all("(videos) => videos.filter((video) => !video.paused).length") == 1
+        assert len({request for request in requests if request.endswith(".mp4")}) == 6
+        video.evaluate("(video) => video.pause()")
+        video.evaluate("(video) => video.play()")
+        page.wait_for_function("(video) => !video.paused", arg=player)
+        pdf = PdfReader(BytesIO(page.pdf()))
+        text = "".join(sheet.extract_text() or "" for sheet in pdf.pages)
+        assert all(project in text for project in ("DevFlow", "Sentinel", "QC Studio", "Atlas", "AS Field"))
 
 
 if __name__ == "__main__":
